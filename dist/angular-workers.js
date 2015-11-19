@@ -23,6 +23,7 @@ angular.module('FredrikSandell.worker-pool', []).service('WorkerService', [
         '};',
         'importScripts(\'<URL_TO_ANGULAR>\');',
         '<CUSTOM_DEP_INCLUDES>',
+		'window._functions = [<ADD_FUNCTIONS>];',
         'angular = window.angular;',
         'var workerApp = angular.module(\'WorkerApp\', [<DEP_MODULES>]);',
         'workerApp.run([\'$q\'<STRING_DEP_NAMES>, function ($q<DEP_NAMES>) {',
@@ -58,14 +59,24 @@ angular.module('FredrikSandell.worker-pool', []).service('WorkerService', [
       //validate the input
       var deferred = $q.defer();
       try {
-        if (!Array.isArray(depFuncList) || depFuncList.length < 3 || typeof depFuncList[depFuncList.length - 1] !== 'function') {
+        if (!Array.isArray(depFuncList) || depFuncList.length < 4 || typeof depFuncList[depFuncList.length - 1] !== 'function' || typeof depFuncList[depFuncList.length - 2] !== 'object') {
           throw 'Input needs to be: [\'input\',\'output\'/*optional additional dependencies*/,\n' + '    function(workerInput, deferredOutput /*optional additional dependencies*/)\n' + '        {/*worker body*/}' + ']';
         }
         if (typeof urlToAngular !== 'string') {
           throw 'The url to angular must be defined before worker creation';
         }
         var dependencyMetaData = createDependencyMetaData(extractDependencyList(depFuncList));
-        var blobURL = (window.webkitURL ? webkitURL : URL).createObjectURL(new Blob([populateWorkerTemplate(workerFunctionToString(depFuncList[depFuncList.length - 1], dependencyMetaData.workerFuncParamList), dependencyMetaData)], { type: 'application/javascript' }));
+        var blobURL = (window.webkitURL ? webkitURL : URL).createObjectURL(
+				new Blob([
+					populateWorkerTemplate(
+							workerFunctionToString(
+									depFuncList[depFuncList.length - 1],
+									dependencyMetaData.workerFuncParamList
+							),
+							depFuncList[depFuncList.length - 2],
+							dependencyMetaData
+					)
+				], { type: 'application/javascript' }));
         var worker = new Worker(blobURL);
         //wait for the worker to load resources
         worker.addEventListener('message', function (e) {
@@ -115,8 +126,15 @@ angular.module('FredrikSandell.worker-pool', []).service('WorkerService', [
       depMetaData.workerFuncParamList = 'input,output' + depMetaData.angularDepsAsParamList;
       return depMetaData;
     }
-    function populateWorkerTemplate(workerFunc, dependencyMetaData) {
-      return workerTemplate.replace('<URL_TO_ANGULAR>', urlToAngular).replace('<CUSTOM_DEP_INCLUDES>', dependencyMetaData.servicesIncludeStatements).replace('<DEP_MODULES>', dependencyMetaData.moduleList).replace('<STRING_DEP_NAMES>', dependencyMetaData.angularDepsAsStrings).replace('<DEP_NAMES>', dependencyMetaData.angularDepsAsParamList).replace('<WORKER_FUNCTION>', workerFunc.toString());
+    function populateWorkerTemplate(workerFunc, additionalFunctions, dependencyMetaData) {
+      return workerTemplate
+			  .replace('<URL_TO_ANGULAR>', urlToAngular)
+			  .replace('<CUSTOM_DEP_INCLUDES>', dependencyMetaData.servicesIncludeStatements)
+			  .replace('<DEP_MODULES>', dependencyMetaData.moduleList)
+			  .replace('<STRING_DEP_NAMES>', dependencyMetaData.angularDepsAsStrings)
+			  .replace('<DEP_NAMES>', dependencyMetaData.angularDepsAsParamList)
+			  .replace('<ADD_FUNCTIONS>', additionalFunctions.join(', '))
+			  .replace('<WORKER_FUNCTION>', workerFunc.toString());
     }
     var buildAngularWorker = function (initializedWorker) {
       var that = {};
@@ -146,7 +164,7 @@ angular.module('FredrikSandell.worker-pool', []).service('WorkerService', [
       return that;
     };
     function extractDependencyList(depFuncList) {
-      return depFuncList.slice(0, depFuncList.length - 1);
+      return depFuncList.slice(0, depFuncList.length - 2);
     }
     function workerFunctionToString(func, paramList) {
       return '(' + func.toString() + ')(' + paramList + ')';
